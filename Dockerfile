@@ -1,7 +1,7 @@
 FROM nginx:alpine
 
-# Copy the EXACT tarball name from Jenkins context
-COPY starbugs-app-*.tar.gz /tmp/app.tar.gz
+# Copy renamed artifact from Jenkins build context
+COPY app.tar.gz /tmp/app.tar.gz
 
 RUN rm -rf /usr/share/nginx/html/* \
     && tar -xzf /tmp/app.tar.gz -C /usr/share/nginx/html/ \
