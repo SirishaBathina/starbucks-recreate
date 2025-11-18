@@ -9,12 +9,12 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      SONAR_URL: "http://54.144.238.57:8081"
-      NEXUS_URL: "http://54.144.238.57:8082"
+      SONAR_URL: "http://54.165.55.79:8081"
+      NEXUS_URL: "http://54.165.55.79:8082"
       NEXUS_REPO: "starbugs-app"
       NEXUS_GROUP: "com/web/starbugs"
       NEXUS_ARTIFACT: "starbugs-app"
-      NGINX_HOST: "54.144.238.57"
+      NGINX_HOST: "54.165.55.79"
       VERSION: "0.0.${{ github.run_number }}"
       DOCKER_IMAGE: "reddi122/starbugs-app:${{ github.run_number }}"
 
