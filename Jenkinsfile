@@ -21,7 +21,7 @@ pipeline {
                 echo '📦 Cloning source code...'
                 checkout([$class: 'GitSCM',
                     branches: [[name: '*/main']],
-                    userRemoteConfigs: [[url: 'https://github.com/reddi122/starbucks-recreate.git']]
+                    userRemoteConfigs: [[url: 'https://github.com/SirishaBathina/starbucks-recreate.git']]
                 ])
             }
         }
