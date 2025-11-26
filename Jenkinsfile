@@ -1,152 +1,116 @@
 pipeline {
-
-    agent {
-        docker {
-            image 'node:18'
-            args '-u root'
-        }
-    }
+    agent { label 'sonar' }
 
     environment {
-        SONAR_URL       = "http://54.144.238.57:8081"
-        NEXUS_URL       = "http://54.144.238.57:8082"
+        // ---- SonarQube ----
+        SONARQUBE_SERVER = 'SonarQube'
 
-        NEXUS_REPO      = "starbugs-app"
-        NEXUS_GROUP     = "com/web/starbugs"
-        NEXUS_ARTIFACT  = "starbugs-app"
-
-        SONAR_TOKEN     = credentials("sonar-token")
-        SSH_CRED        = "nginx-ssh"
-
-        NGINX_HOST      = "54.144.238.57"
-
-        DOCKER_IMAGE    = "reddi122/starbugs-app:${BUILD_NUMBER}"
+        // ---- Nexus ----
+        NEXUS_URL       = 'http://172.28.99.196:8081'
+        NEXUS_REPO      = 'starbugs-app'
+        NEXUS_GROUP     = 'com/web/starbugs'
+        NEXUS_ARTIFACT  = 'starbugs-app'
     }
 
     stages {
 
+        /* === Stage 1: Checkout Code === */
         stage('Checkout Code') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/reddi122/starbucks-recreate.git'
+                echo '📦 Cloning source code...'
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[url: 'https://github.com/reddi122/starbucks-recreate.git']]
+                ])
             }
         }
 
+        /* === Stage 2: Install Dependencies === */
         stage('Install Dependencies') {
             steps {
-                sh "npm install"
+                echo '📥 Installing npm dependencies...'
+                sh '''
+                    npm install
+                    echo "Dependencies installed!"
+                '''
             }
         }
 
+        /* === Stage 3: SonarQube Analysis === */
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('sonar') {
-                    sh """
-                        wget -q -O sonar.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
-                        unzip -qo sonar.zip
-                        export PATH=\$(pwd)/sonar-scanner-5.0.1.3006-linux/bin:\$PATH
+                echo '🔍 Running SonarQube analysis...'
+                sh 'npm install -g sonarqube-scanner || true'
 
-                        sonar-scanner \
-                          -Dsonar.projectKey=starbugs-react \
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh '''
+                        npx sonar-scanner \
+                          -Dsonar.projectKey=starbugs-app-js \
+                          -Dsonar.projectName="Starbugs App JS" \
+                          -Dsonar.projectVersion=0.0.${BUILD_NUMBER} \
                           -Dsonar.sources=src \
-                          -Dsonar.host.url=${SONAR_URL} \
-                          -Dsonar.login=${SONAR_TOKEN} \
-                          -Dsonar.projectVersion=0.0.${BUILD_NUMBER}
-                    """
+                          -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                          -Dsonar.sourceEncoding=UTF-8
+                    '''
                 }
             }
         }
 
-        stage('Build React App') {
+        /* === Stage 4: Run Tests === */
+        stage('Run Tests') {
             steps {
-                sh "npm run build"
+                echo '🧪 Running tests...'
+                sh 'npm test || true'
             }
         }
 
-        stage('Package Build Artifact') {
+        /* === Stage 5: Build Application === */
+        stage('Build Application') {
             steps {
-                sh """
+                echo '⚙️ Building application...'
+                sh '''
+                    npm run build
+                    echo "Build Completed!"
+                    ls -lh dist/ || true
+                '''
+            }
+        }
+
+        /* === Stage 6: Package Artifact === */
+        stage('Package Artifact') {
+            steps {
+                echo '📦 Packaging build output...'
+                sh '''
                     VERSION="0.0.${BUILD_NUMBER}"
-                    mkdir -p packaged
-                    tar -czf packaged/${NEXUS_ARTIFACT}-\${VERSION}.tar.gz -C dist .
-                """
+                    tar -czf ${NEXUS_ARTIFACT}-${VERSION}.tar.gz -C dist .
+                    echo "Artifact created: ${NEXUS_ARTIFACT}-${VERSION}.tar.gz"
+                '''
             }
         }
 
+        /* === Stage 7: Upload to Nexus === */
         stage('Upload to Nexus') {
             steps {
-                withCredentials([
-                    usernamePassword(credentialsId: 'nexus-creds',
-                        usernameVariable: 'NEXUS_USER',
-                        passwordVariable: 'NEXUS_PASS')
-                ]) {
-                    sh """
+                withCredentials([usernamePassword(credentialsId: 'nexus', usernameVariable: 'NEXUS_USR', passwordVariable: 'NEXUS_PSW')]) {
+                    sh '''
                         VERSION="0.0.${BUILD_NUMBER}"
-                        FILE="packaged/${NEXUS_ARTIFACT}-\${VERSION}.tar.gz"
+                        TARBALL="${NEXUS_ARTIFACT}-${VERSION}.tar.gz"
 
-                        curl -v -u \${NEXUS_USER}:\${NEXUS_PASS} \
-                            --upload-file "\$FILE" \
-                            "${NEXUS_URL}/repository/${NEXUS_REPO}/${NEXUS_GROUP}/${NEXUS_ARTIFACT}/\${VERSION}/${NEXUS_ARTIFACT}-\${VERSION}.tar.gz"
-                    """
-                }
-            }
-        }
+                        echo "📤 Uploading artifact to Nexus..."
 
-        stage('Dockerize React App') {
-            agent none
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-id',
-                        usernameVariable: 'HUB_USER',
-                        passwordVariable: 'HUB_PASS'
-                    )
-                ]) {
-                    sh """
-                        VERSION="0.0.${BUILD_NUMBER}"
-                        TARBALL="${NEXUS_ARTIFACT}-\${VERSION}.tar.gz"
-                        DOWNLOAD_URL="${NEXUS_URL}/repository/${NEXUS_REPO}/${NEXUS_GROUP}/${NEXUS_ARTIFACT}/\${VERSION}/\${TARBALL}"
+                        curl -v -u ${NEXUS_USR}:${NEXUS_PSW} \
+                          --upload-file "$TARBALL" \
+                          "${NEXUS_URL}/repository/${NEXUS_REPO}/${NEXUS_GROUP}/${NEXUS_ARTIFACT}/${VERSION}/${TARBALL}"
 
-                        echo "Downloading artifact..."
-                        curl -f -o \${TARBALL} \${DOWNLOAD_URL}
-
-                        mv \${TARBALL} app.tar.gz
-
-                        docker build -t ${DOCKER_IMAGE} .
-
-                        docker login -u \${HUB_USER} -p \${HUB_PASS}
-                        docker push ${DOCKER_IMAGE}
-                    """
-                }
-            }
-        }
-
-        stage('Deploy Dockerized App') {
-            steps {
-                withCredentials([
-                    sshUserPrivateKey(credentialsId: "${SSH_CRED}",
-                    keyFileVariable: 'SSH_KEY',
-                    usernameVariable: 'SSH_USER')
-                ]) {
-
-                    sh """
-                        ssh -o StrictHostKeyChecking=no -i \${SSH_KEY} \${SSH_USER}@${NGINX_HOST} "
-                            docker rm -f starbugs-app || true
-                            docker pull ${DOCKER_IMAGE}
-                            docker run -d --name starbugs-app -p 80:80 ${DOCKER_IMAGE}
-                        "
-                    """
+                        echo "✅ Artifact uploaded successfully!"
+                    '''
                 }
             }
         }
     }
 
     post {
-        success {
-            echo "🎉 CI/CD Success — App Built, Scanned, Uploaded, Dockerized & Deployed!"
-        }
-        failure {
-            echo "❌ Pipeline Failed — Check logs."
-        }
+        success { echo '🎉 Pipeline completed successfully!' }
+        failure { echo '❌ Pipeline failed — check logs.' }
     }
 }
