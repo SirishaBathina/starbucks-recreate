@@ -1,5 +1,6 @@
 pipeline {
-    agent { label 'sonar' }
+    agent { label 'dind-agent' }
+
 
     environment {
         // ---- SonarQube ----
