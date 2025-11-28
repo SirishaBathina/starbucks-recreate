@@ -1,1 +1,21 @@
 
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: starbucks-recreate
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: "https://github.com/SirishaBathina/starbucks-recreate"
+    targetRevision: main
+    path: k8s/base
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
